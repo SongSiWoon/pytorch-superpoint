@@ -3,8 +3,7 @@
 logs/
 
 # 데이터셋 폴더
-dataset/
-data/
+datasets/
 
 # OS/IDE
 .DS_Store
