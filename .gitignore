@@ -1,0 +1,12 @@
+# 로그 파일
+*.log
+logs/
+
+# 데이터셋 폴더
+dataset/
+data/
+
+# OS/IDE
+.DS_Store
+*.swp
+
