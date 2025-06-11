@@ -75,6 +75,29 @@ def train_joint(config, output_dir, args):
     from utils.loader import get_module
     train_model_frontend = get_module('', config['front_end_model'])
 
+    # wandb 초기화
+    if config["wandb"]["enable"]:
+        import wandb
+        print("Initializing wandb...")
+        try:
+            wandb.init(
+                project=config["wandb"]["project"],
+                name=config["wandb"]["name"],
+                tags=config["wandb"]["tags"],
+                notes=config["wandb"]["notes"],
+                config=config,  # 전체 config를 전달
+                settings=wandb.Settings(start_method="thread")
+            )
+            # wandb 설정 확인
+            print(f"wandb project: {wandb.run.project}")
+            print(f"wandb run name: {wandb.run.name}")
+            print(f"wandb run id: {wandb.run.id}")
+            print("wandb initialized successfully!")
+        except Exception as e:
+            print(f"wandb initialization failed: {e}")
+            config["wandb"]["enable"] = False
+    
+    # 학습 에이전트 초기화
     train_agent = train_model_frontend(config, save_path=save_path, device=device)
 
     # writer from tensorboard

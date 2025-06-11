@@ -16,6 +16,8 @@ import torch.utils.data
 from tqdm import tqdm
 from utils.loader import dataLoader, modelLoader, pretrainedLoader
 import logging
+import os
+import glob
 
 from utils.tools import dict_update
 
@@ -186,6 +188,7 @@ class Train_model_frontend(object):
         """
         model = self.config["model"]["name"]
         params = self.config["model"]["params"]
+        params["config"] = self.config  # config를 params에 추가
         print("model: ", model)
         net = modelLoader(model=model, **params).to(self.device)
         logging.info("=> setting adam solver")
@@ -291,7 +294,7 @@ class Train_model_frontend(object):
                         self.config["save_interval"],
                         self.n_iter,
                     )
-                    self.saveModel()
+                    self.saveModel(True)
                 # ending condition
                 if self.n_iter > self.max_iter:
                     # end training
@@ -578,13 +581,9 @@ class Train_model_frontend(object):
 
         return loss.item()
 
-    def saveModel(self):
-        """
-        # save checkpoint for resuming training
-        :return:
-        """
+    def saveModel(self, is_best=False):
         model_state_dict = self.net.module.state_dict()
-        save_checkpoint(
+        saved_path = save_checkpoint(
             self.save_path,
             {
                 "n_iter": self.n_iter + 1,
@@ -594,7 +593,32 @@ class Train_model_frontend(object):
             },
             self.n_iter,
         )
-        pass
+
+        if self.config.get("wandb", {}).get("enable", False):
+            import wandb
+            wandb.save(saved_path)
+
+        if is_best:
+            best_filename = "superPointNet_best_checkpoint.pth.tar"
+            best_saved_path = save_checkpoint(
+                self.save_path,
+                {
+                    "n_iter": self.n_iter + 1,
+                    "model_state_dict": model_state_dict,
+                    "optimizer_state_dict": self.optimizer.state_dict(),
+                    "loss": self.loss,
+                },
+                "best"
+            )
+            if self.config.get("wandb", {}).get("enable", False):
+                wandb.save(best_saved_path)
+            # 기존 체크포인트 삭제 (best만 남김)
+            for f in glob.glob(os.path.join(self.save_path, "*.pth*")):
+                if not f.endswith(best_filename) and f != best_saved_path:
+                    os.remove(f)
+        else:
+            if os.path.exists(saved_path):
+                os.remove(saved_path)
 
     def add_single_image_to_tb(self, task, img_tensor, n_iter, name="img"):
         """
@@ -774,13 +798,13 @@ class Train_model_frontend(object):
             pts_nms = getPtsFromHeatmap(semi_thd, conf_thresh, nms_dist)
             semi_thd_nms_sample = np.zeros_like(semi_thd)
             semi_thd_nms_sample[
-                pts_nms[1, :].astype(np.int), pts_nms[0, :].astype(np.int)
+                pts_nms[1, :].astype(np.int32), pts_nms[0, :].astype(np.int32)
             ] = 1
 
             label_sample = torch.squeeze(labels_2D[idx, :, :, :])
             # pts_nms = getPtsFromHeatmap(label_sample.numpy(), conf_thresh, nms_dist)
             # label_sample_rms_sample = np.zeros_like(label_sample.numpy())
-            # label_sample_rms_sample[pts_nms[1, :].astype(np.int), pts_nms[0, :].astype(np.int)] = 1
+            # label_sample_rms_sample[pts_nms[1, :].astype(np.int32), pts_nms[0, :].astype(np.int32)] = 1
             label_sample_nms_sample = label_sample
 
             if idx < 5:

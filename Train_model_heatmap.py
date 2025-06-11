@@ -199,7 +199,7 @@ class Train_model_heatmap(Train_model_frontend):
         batch_size, H, W = img.shape[0], img.shape[2], img.shape[3]
         self.batch_size = batch_size
         det_loss_type = self.config["model"]["detector_loss"]["loss_type"]
-        # print("batch_size: ", batch_size)
+        if_warp = self.config["data"]["warped_pair"]["enable"]
         Hc = H // self.cell_size
         Wc = W // self.cell_size
 
@@ -227,17 +227,17 @@ class Train_model_heatmap(Train_model_frontend):
         if train:
             # print("img: ", img.shape, ", img_warp: ", img_warp.shape)
             outs = self.net(img.to(self.device))
-            semi, coarse_desc = outs["semi"], outs["desc"]
+            semi, coarse_desc = outs  # 튜플 언패킹
             if if_warp:
                 outs_warp = self.net(img_warp.to(self.device))
-                semi_warp, coarse_desc_warp = outs_warp["semi"], outs_warp["desc"]
+                semi_warp, coarse_desc_warp = outs_warp  # 튜플 언패킹
         else:
             with torch.no_grad():
                 outs = self.net(img.to(self.device))
-                semi, coarse_desc = outs["semi"], outs["desc"]
+                semi, coarse_desc = outs  # 튜플 언패킹
                 if if_warp:
                     outs_warp = self.net(img_warp.to(self.device))
-                    semi_warp, coarse_desc_warp = outs_warp["semi"], outs_warp["desc"]
+                    semi_warp, coarse_desc_warp = outs_warp  # 튜플 언패킹
                 pass
 
         # detector loss
@@ -263,7 +263,7 @@ class Train_model_heatmap(Train_model_frontend):
         ).float()
         mask_3D_flattened = self.getMasks(mask_2D, self.cell_size, device=self.device)
         loss_det = self.detector_loss(
-            input=outs["semi"],
+            input=semi,  # semi 직접 사용
             target=labels_3D.to(self.device),
             mask=mask_3D_flattened,
             loss_type=det_loss_type,
@@ -279,7 +279,7 @@ class Train_model_heatmap(Train_model_frontend):
                 mask_warp_2D, self.cell_size, device=self.device
             )
             loss_det_warp = self.detector_loss(
-                input=outs_warp["semi"],
+                input=semi_warp,  # semi_warp 직접 사용
                 target=labels_3D.to(self.device),
                 mask=mask_3D_flattened,
                 loss_type=det_loss_type,
@@ -518,6 +518,49 @@ class Train_model_heatmap(Train_model_frontend):
 
         self.tb_scalar_dict(self.scalar_dict, task)
 
+        # wandb 로깅 추가
+        if self.config["wandb"]["enable"] and n_iter % tb_interval == 0:
+            import wandb
+            try:
+                # 기본 메트릭 로깅
+                metrics = {
+                    "train/loss": float(loss.item()),
+                    "train/loss_det": float(loss_det.item()),
+                    "train/loss_det_warp": float(loss_det_warp.item()),
+                    "train/positive_dist": float(positive_dist.item()),
+                    "train/negative_dist": float(negative_dist.item()),
+                    "train/learning_rate": float(self.optimizer.param_groups[0]['lr']),
+                    "train/iteration": int(n_iter)
+                }
+                
+                # precision과 recall이 있는 경우 추가
+                if "precision" in self.scalar_dict and "recall" in self.scalar_dict:
+                    metrics.update({
+                        "train/precision": float(self.scalar_dict["precision"]),
+                        "train/recall": float(self.scalar_dict["recall"])
+                    })
+                
+                print(f"Logging metrics to wandb: {metrics}")
+                wandb.log(metrics, step=n_iter)
+
+                # 이미지 로깅 (덜 자주)
+                if n_iter % (tb_interval * 5) == 0:
+                    images = {
+                        "train/images": wandb.Image(img[0].detach().cpu().numpy()),
+                        "train/heatmap": wandb.Image(heatmap_org[0].detach().cpu().numpy())
+                    }
+                    
+                    if if_warp:
+                        images.update({
+                            "train/warped_images": wandb.Image(img_warp[0].detach().cpu().numpy()),
+                            "train/warped_heatmap": wandb.Image(heatmap_warp[0].detach().cpu().numpy())
+                        })
+                    
+                    print(f"Logging images to wandb at iteration {n_iter}")
+                    wandb.log(images, step=n_iter)
+            except Exception as e:
+                print(f"wandb logging failed: {e}")
+
         return loss.item()
 
     def heatmap_to_nms(self, images_dict, heatmap, name):
@@ -668,7 +711,7 @@ class Train_model_heatmap(Train_model_frontend):
         pts_nms = getPtsFromHeatmap(heatmap, conf_thresh, nms_dist)
         semi_thd_nms_sample = np.zeros_like(heatmap)
         semi_thd_nms_sample[
-            pts_nms[1, :].astype(np.int), pts_nms[0, :].astype(np.int)
+            pts_nms[1, :].astype(np.int32), pts_nms[0, :].astype(np.int32)
         ] = 1
         return semi_thd_nms_sample
 

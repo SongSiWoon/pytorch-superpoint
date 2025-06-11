@@ -1,21 +1,27 @@
-# torch >= 0.4.1
-# torchvision
-argparse
-scipy
-opencv-python==3.4.2.16
-opencv-contrib-python==3.4.2.16
-matplotlib
-imageio
-tqdm
-tensorflow==1.14.0
-tensorboardX
-tqdm
-pyyaml
-imageio
-imgaug
-jupyter
-scikit-learn
+# Deep Learning Framework
+# torch>=1.7.0
+# torchvision>=0.8.0
+# torchgeometry>=0.1.2
+# torchsummary>=1.5.1
 
-torchgeometry
-torchsummary
-coloredlogs
+# Computer Vision
+opencv-python>=4.5.0
+opencv-contrib-python>=4.5.0
+imgaug>=0.4.0
+
+# Data Processing & Visualization
+numpy>=1.19.0
+scipy>=1.5.0
+matplotlib>=3.3.0
+imageio>=2.9.0
+tqdm>=4.50.0
+scikit-learn>=0.24.0
+
+# Utilities
+argparse>=1.4.0
+pyyaml>=5.4.0
+coloredlogs>=15.0.0
+tensorboardX>=2.2.0
+
+# Development
+jupyter>=1.0.0
