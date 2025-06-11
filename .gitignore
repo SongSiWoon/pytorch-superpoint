@@ -8,4 +8,14 @@ datasets/
 # OS/IDE
 .DS_Store
 *.swp
+# Bytecode
+__pycache__/
+*.py[cod]
+
+# IDE 설정
+.vscode/
+
+# 런타임 아티팩트
+runs/
+wandb/
 
