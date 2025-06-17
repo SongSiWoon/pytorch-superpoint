@@ -48,8 +48,6 @@ def train_joint(config, output_dir, args):
     assert 'train_iter' in config
 
     # config
-    # from utils.utils import pltImshow
-    # from utils.utils import saveImg
     torch.set_default_tensor_type(torch.FloatTensor)
     task = config['data']['dataset']
     
@@ -57,21 +55,17 @@ def train_joint(config, output_dir, args):
     logging.info('train on device: %s', device)
     with open(os.path.join(output_dir, 'config.yml'), 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
-    # writer = SummaryWriter(getWriterPath(task=args.command, date=True))
-    writer = SummaryWriter(getWriterPath(task=args.command, 
-        exper_name=args.exper_name, date=True))
+    
     ## save data
     save_path = get_save_path(output_dir)
 
     # data loading
-    # data = dataLoader(config, dataset='syn', warp_input=True)
     data = dataLoader(config, dataset=task, warp_input=True)
     train_loader, val_loader = data['train_loader'], data['val_loader']
 
     datasize(train_loader, config, tag='train')
     datasize(val_loader, config, tag='val')
-    # init the training agent using config file
-    # from train_model_frontend import Train_model_frontend
+    
     from utils.loader import get_module
     train_model_frontend = get_module('', config['front_end_model'])
 
@@ -99,9 +93,6 @@ def train_joint(config, output_dir, args):
     
     # 학습 에이전트 초기화
     train_agent = train_model_frontend(config, save_path=save_path, device=device)
-
-    # writer from tensorboard
-    train_agent.writer = writer
 
     # feed the data into the agent
     train_agent.train_loader = train_loader

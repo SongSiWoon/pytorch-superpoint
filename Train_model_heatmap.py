@@ -227,17 +227,17 @@ class Train_model_heatmap(Train_model_frontend):
         if train:
             # print("img: ", img.shape, ", img_warp: ", img_warp.shape)
             outs = self.net(img.to(self.device))
-            semi, coarse_desc = outs  # 튜플 언패킹
+            semi, coarse_desc = outs['semi'], outs['desc']  # 딕셔너리에서 값 추출
             if if_warp:
                 outs_warp = self.net(img_warp.to(self.device))
-                semi_warp, coarse_desc_warp = outs_warp  # 튜플 언패킹
+                semi_warp, coarse_desc_warp = outs_warp['semi'], outs_warp['desc']  # 딕셔너리에서 값 추출
         else:
             with torch.no_grad():
                 outs = self.net(img.to(self.device))
-                semi, coarse_desc = outs  # 튜플 언패킹
+                semi, coarse_desc = outs['semi'], outs['desc']  # 딕셔너리에서 값 추출
                 if if_warp:
                     outs_warp = self.net(img_warp.to(self.device))
-                    semi_warp, coarse_desc_warp = outs_warp  # 튜플 언패킹
+                    semi_warp, coarse_desc_warp = outs_warp['semi'], outs_warp['desc']  # 딕셔너리에서 값 추출
                 pass
 
         # detector loss
@@ -544,20 +544,20 @@ class Train_model_heatmap(Train_model_frontend):
                 wandb.log(metrics, step=n_iter)
 
                 # 이미지 로깅 (덜 자주)
-                if n_iter % (tb_interval * 5) == 0:
-                    images = {
-                        "train/images": wandb.Image(img[0].detach().cpu().numpy()),
-                        "train/heatmap": wandb.Image(heatmap_org[0].detach().cpu().numpy())
-                    }
+                # if n_iter % (tb_interval * 5) == 0:
+                #     images = {
+                #         "train/images": wandb.Image(img[0].detach().cpu().numpy()),
+                #         "train/heatmap": wandb.Image(heatmap_org[0].detach().cpu().numpy())
+                #     }
                     
-                    if if_warp:
-                        images.update({
-                            "train/warped_images": wandb.Image(img_warp[0].detach().cpu().numpy()),
-                            "train/warped_heatmap": wandb.Image(heatmap_warp[0].detach().cpu().numpy())
-                        })
+                #     if if_warp:
+                #         images.update({
+                #             "train/warped_images": wandb.Image(img_warp[0].detach().cpu().numpy()),
+                #             "train/warped_heatmap": wandb.Image(heatmap_warp[0].detach().cpu().numpy())
+                #         })
                     
-                    print(f"Logging images to wandb at iteration {n_iter}")
-                    wandb.log(images, step=n_iter)
+                #     print(f"Logging images to wandb at iteration {n_iter}")
+                #     wandb.log(images, step=n_iter)
             except Exception as e:
                 print(f"wandb logging failed: {e}")
 

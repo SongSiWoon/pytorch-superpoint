@@ -63,7 +63,7 @@ class Train_model_frontend(object):
 
     default_config = {
         "train_iter": 170000,
-        "save_interval": 2000,
+        "save_interval": 10000,
         "tensorboard_interval": 200,
         "model": {"subpixel": {"enable": False}},
     }
@@ -188,7 +188,9 @@ class Train_model_frontend(object):
         """
         model = self.config["model"]["name"]
         params = self.config["model"]["params"]
-        params["config"] = self.config  # config를 params에 추가
+        # SuperPointNet_gauss2는 config 매개변수를 받지 않으므로 조건부로 처리
+        if model != "SuperPointNet_gauss2":
+            params["config"] = self.config  # config를 params에 추가
         print("model: ", model)
         net = modelLoader(model=model, **params).to(self.device)
         logging.info("=> setting adam solver")
@@ -271,6 +273,8 @@ class Train_model_frontend(object):
         logging.info("max_iter: %d", self.max_iter)
         running_losses = []
         epoch = 0
+        best_loss = float('inf')
+        
         # Train one epoch
         while self.n_iter < self.max_iter:
             print("epoch: ", epoch)
@@ -280,21 +284,26 @@ class Train_model_frontend(object):
                 loss_out = self.train_val_sample(sample_train, self.n_iter, True)
                 self.n_iter += 1
                 running_losses.append(loss_out)
+                
                 # run validation
                 if self._eval and self.n_iter % self.config["validation_interval"] == 0:
                     logging.info("====== Validating...")
+                    val_losses = []
                     for j, sample_val in enumerate(self.val_loader):
-                        self.train_val_sample(sample_val, self.n_iter + j, False)
+                        val_loss = self.train_val_sample(sample_val, self.n_iter + j, False)
+                        val_losses.append(val_loss)
                         if j > self.config.get("validation_size", 3):
                             break
-                # save model
-                if self.n_iter % self.config["save_interval"] == 0:
-                    logging.info(
-                        "save model: every %d interval, current iteration: %d",
-                        self.config["save_interval"],
-                        self.n_iter,
-                    )
-                    self.saveModel(True)
+                    
+                    # validation loss의 평균 계산
+                    avg_val_loss = sum(val_losses) / len(val_losses)
+                    
+                    # best 모델 저장
+                    if avg_val_loss < best_loss:
+                        best_loss = avg_val_loss
+                        logging.info("New best model! Loss: %f", best_loss)
+                        self.saveModel(is_best=True)
+                
                 # ending condition
                 if self.n_iter > self.max_iter:
                     # end training
@@ -366,25 +375,19 @@ class Train_model_frontend(object):
 
         losses = {}
         ## get the inputs
-        # logging.info('get input img and label')
         img, labels_2D, mask_2D = (
             sample["image"],
             sample["labels_2D"],
             sample["valid_mask"],
         )
-        # img, labels = img.to(self.device), labels_2D.to(self.device)
 
         # variables
         batch_size, H, W = img.shape[0], img.shape[2], img.shape[3]
         self.batch_size = batch_size
-        # print("batch_size: ", batch_size)
         Hc = H // self.cell_size
         Wc = W // self.cell_size
 
         # warped images
-        # img_warp, labels_warp_2D, mask_warp_2D = sample['warped_img'].to(self.device), \
-        #     sample['warped_labels'].to(self.device), \
-        #     sample['warped_valid_mask'].to(self.device)
         img_warp, labels_warp_2D, mask_warp_2D = (
             sample["warped_img"],
             sample["warped_labels"],
@@ -392,8 +395,6 @@ class Train_model_frontend(object):
         )
 
         # homographies
-        # mat_H, mat_H_inv = \
-        # sample['homographies'].to(self.device), sample['inv_homographies'].to(self.device)
         mat_H, mat_H_inv = sample["homographies"], sample["inv_homographies"]
 
         # zero the parameter gradients
@@ -401,7 +402,6 @@ class Train_model_frontend(object):
 
         # forward + backward + optimize
         if train:
-            # print("img: ", img.shape, ", img_warp: ", img_warp.shape)
             outs, outs_warp = (
                 self.net(img.to(self.device)),
                 self.net(img_warp.to(self.device), subpixel=self.subpixel),
@@ -439,12 +439,7 @@ class Train_model_frontend(object):
 
         mask_desc = mask_3D_flattened.unsqueeze(1)
 
-        # print("mask_desc: ", mask_desc.shape)
-        # print("mask_warp_2D: ", mask_warp_2D.shape)
-
         # descriptor loss
-
-        # if self.desc_loss_type == 'dense':
         loss_desc, mask, positive_dist, negative_dist = self.descriptor_loss(
             coarse_desc,
             coarse_desc_warp,
@@ -461,34 +456,22 @@ class Train_model_frontend(object):
         if self.subpixel:
             # coarse to dense descriptor
             # work on warped level
-            # dense_desc = interpolate_to_dense(coarse_desc_warp, cell_size=self.cell_size) # tensor [batch, 256, H, W]
             dense_map = flattenDetection(semi_warp)  # tensor [batch, 1, H, W]
             # concat image and dense_desc
             concat_features = torch.cat(
                 (img_warp.to(self.device), dense_map), dim=1
             )  # tensor [batch, n, H, W]
             # prediction
-            # pred_heatmap = self.subpixNet(concat_features.to(self.device)) # tensor [batch, 1, H, W]
             pred_heatmap = outs_warp[2]  # tensor [batch, 1, H, W]
-            # print("pred_heatmap: ",  pred_heatmap.shape)
-            # add histogram here
-            # tensor [batch, channels, H, W]
+
             # loss
             labels_warped_res = sample["warped_res"]
-            # writer.add_histogram(task + '-' + 'warped_res',
-            #     labels_warped_res[0,...].clone().cpu().data.numpy().transpose(0,1).transpose(1,2).view(-1, 2),
-            #     n_iter)
-
-            # from utils.losses import subpixel_loss
             subpix_loss = self.subpixel_loss_func(
                 labels_warp_2D.to(self.device),
                 labels_warped_res.to(self.device),
                 pred_heatmap.to(self.device),
                 patch_size=11,
             )
-            # print("subpix_loss: ", subpix_loss)
-            # loss += subpix_loss
-            # loss = subpix_loss
 
             # extract the patches from labels
             label_idx = labels_2D[...].nonzero()
@@ -500,8 +483,6 @@ class Train_model_frontend(object):
                 img_warp.to(self.device),
                 patch_size=patch_size,
             )  # tensor [N, patch_size, patch_size]
-            # patches = extract_patches(label_idx.to(device), labels_2D.to(device), patch_size=15) # tensor [N, patch_size, patch_size]
-            print("patches: ", patches.shape)
 
             def label_to_points(labels_res, points):
                 labels_res = labels_res.transpose(1, 2).transpose(2, 3).unsqueeze(1)
@@ -541,49 +522,26 @@ class Train_model_frontend(object):
                 "negative_dist": negative_dist,
             }
         )
-        # print("losses: ", losses)
 
         if train:
             loss.backward()
             self.optimizer.step()
 
-        self.addLosses2tensorboard(losses, task)
         if n_iter % tb_interval == 0 or task == "val":
             logging.info(
                 "current iteration: %d, tensorboard_interval: %d", n_iter, tb_interval
             )
-            self.addImg2tensorboard(
-                img,
-                labels_2D,
-                semi,
-                img_warp,
-                labels_warp_2D,
-                mask_warp_2D,
-                semi_warp,
-                mask_3D_flattened=mask_3D_flattened,
-                task=task,
-            )
-
-            if self.subpixel:
-                # print("only update subpixel_loss")
-
-                self.add_single_image_to_tb(
-                    task, pred_heatmap, n_iter, name="subpixel_heatmap"
-                )
-
             self.printLosses(losses, task)
-
-            # if n_iter % tb_interval == 0 or task == 'val':
-            # print ("add nms")
-            self.add2tensorboard_nms(
-                img, labels_2D, semi, task=task, batch_size=batch_size
-            )
 
         return loss.item()
 
     def saveModel(self, is_best=False):
+        if not is_best:
+            return
+
         model_state_dict = self.net.module.state_dict()
-        saved_path = save_checkpoint(
+        best_filename = "superPointNet_best_checkpoint.pth.tar"
+        best_saved_path = save_checkpoint(
             self.save_path,
             {
                 "n_iter": self.n_iter + 1,
@@ -591,34 +549,27 @@ class Train_model_frontend(object):
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "loss": self.loss,
             },
-            self.n_iter,
+            "best"
         )
 
-        if self.config.get("wandb", {}).get("enable", False):
-            import wandb
-            wandb.save(saved_path)
-
-        if is_best:
-            best_filename = "superPointNet_best_checkpoint.pth.tar"
-            best_saved_path = save_checkpoint(
-                self.save_path,
-                {
-                    "n_iter": self.n_iter + 1,
-                    "model_state_dict": model_state_dict,
-                    "optimizer_state_dict": self.optimizer.state_dict(),
-                    "loss": self.loss,
-                },
-                "best"
-            )
-            if self.config.get("wandb", {}).get("enable", False):
-                wandb.save(best_saved_path)
-            # 기존 체크포인트 삭제 (best만 남김)
-            for f in glob.glob(os.path.join(self.save_path, "*.pth*")):
-                if not f.endswith(best_filename) and f != best_saved_path:
-                    os.remove(f)
+        # === 백본만 따로 저장 ===
+        if hasattr(self.net.module, 'save_backbone'):
+            self.net.module.save_backbone(self.save_path)
         else:
-            if os.path.exists(saved_path):
-                os.remove(saved_path)
+            print("[경고] save_backbone 메서드가 없습니다. 백본 저장이 생략됩니다.")
+
+        if self.config.get("wandb", {}).get("enable", False):
+            upload_interval = 10000  # 원하는 업로드 간격(예: 10000)
+            if self.n_iter % upload_interval == 0 or is_best:
+                import wandb
+                wandb.save(best_saved_path)
+                # 필요하면 백본도 업로드
+                # wandb.save(backbone_path)
+
+        # 기존 체크포인트 삭제 (best만 남김)
+        for f in glob.glob(os.path.join(self.save_path, "*.pth*")):
+            if not f.endswith(best_filename) and f != best_saved_path:
+                os.remove(f)
 
     def add_single_image_to_tb(self, task, img_tensor, n_iter, name="img"):
         """
@@ -629,13 +580,8 @@ class Train_model_frontend(object):
         :param name:
         :return:
         """
-        if img_tensor.dim() == 4:
-            for i in range(min(img_tensor.shape[0], 5)):
-                self.writer.add_image(
-                    task + "-" + name + "/%d" % i, img_tensor[i, :, :, :], n_iter
-                )
-        else:
-            self.writer.add_image(task + "-" + name, img_tensor[:, :, :], n_iter)
+        # TensorBoard 관련 코드 제거
+        pass
 
     # tensorboard
     def addImg2tensorboard(
@@ -663,61 +609,8 @@ class Train_model_frontend(object):
         :param task:
         :return:
         """
-        # print("add images to tensorboard")
-
-        n_iter = self.n_iter
-        semi_flat = flattenDetection(semi[0, :, :, :])
-        semi_warp_flat = flattenDetection(semi_warp[0, :, :, :])
-
-        thd = self.config["model"]["detection_threshold"]
-        semi_thd = thd_img(semi_flat, thd=thd)
-        semi_warp_thd = thd_img(semi_warp_flat, thd=thd)
-
-        result_overlap = img_overlap(
-            toNumpy(labels_2D[0, :, :, :]), toNumpy(semi_thd), toNumpy(img[0, :, :, :])
-        )
-
-        self.writer.add_image(
-            task + "-detector_output_thd_overlay", result_overlap, n_iter
-        )
-        saveImg(
-            result_overlap.transpose([1, 2, 0])[..., [2, 1, 0]] * 255, "test_0.png"
-        )  # rgb to bgr * 255
-
-        result_overlap = img_overlap(
-            toNumpy(labels_warp_2D[0, :, :, :]),
-            toNumpy(semi_warp_thd),
-            toNumpy(img_warp[0, :, :, :]),
-        )
-        self.writer.add_image(
-            task + "-warp_detector_output_thd_overlay", result_overlap, n_iter
-        )
-        saveImg(
-            result_overlap.transpose([1, 2, 0])[..., [2, 1, 0]] * 255, "test_1.png"
-        )  # rgb to bgr * 255
-
-        mask_overlap = img_overlap(
-            toNumpy(1 - mask_warp_2D[0, :, :, :]) / 2,
-            np.zeros_like(toNumpy(img_warp[0, :, :, :])),
-            toNumpy(img_warp[0, :, :, :]),
-        )
-
-        # writer.add_image(task + '_mask_valid_first_layer', mask_warp[0, :, :, :], n_iter)
-        # writer.add_image(task + '_mask_valid_last_layer', mask_warp[-1, :, :, :], n_iter)
-        ##### print to check
-        # print("mask_2D shape: ", mask_warp_2D.shape)
-        # print("mask_3D_flattened shape: ", mask_3D_flattened.shape)
-        for i in range(self.batch_size):
-            if i < 5:
-                self.writer.add_image(
-                    task + "-mask_warp_origin", mask_warp_2D[i, :, :, :], n_iter
-                )
-                self.writer.add_image(
-                    task + "-mask_warp_3D_flattened", mask_3D_flattened[i, :, :], n_iter
-                )
-        # self.writer.add_image(task + '-mask_warp_origin-1', mask_warp_2D[1, :, :, :], n_iter)
-        # self.writer.add_image(task + '-mask_warp_3D_flattened-1', mask_3D_flattened[1, :, :], n_iter)
-        self.writer.add_image(task + "-mask_warp_overlay", mask_overlap, n_iter)
+        # TensorBoard 관련 코드 제거
+        pass
 
     def tb_scalar_dict(self, losses, task="training"):
         """
@@ -726,9 +619,8 @@ class Train_model_frontend(object):
         :param task:
         :return:
         """
-        for element in list(losses):
-            self.writer.add_scalar(task + "-" + element, losses[element], self.n_iter)
-            # print (task, '-', element, ": ", losses[element].item())
+        # TensorBoard 관련 코드 제거
+        pass
 
     def tb_images_dict(self, task, tb_imgs, max_img=5):
         """
@@ -740,23 +632,11 @@ class Train_model_frontend(object):
             int - number of images
         :return:
         """
-        for element in list(tb_imgs):
-            for idx in range(tb_imgs[element].shape[0]):
-                if idx >= max_img:
-                    break
-                # print(f"element: {element}")
-                self.writer.add_image(
-                    task + "-" + element + "/%d" % idx,
-                    tb_imgs[element][idx, ...],
-                    self.n_iter,
-                )
-
+        # TensorBoard 관련 코드 제거
+        pass
 
     def tb_hist_dict(self, task, tb_dict):
-        for element in list(tb_dict):
-            self.writer.add_histogram(
-                task + "-" + element, tb_dict[element], self.n_iter
-            )
+        # TensorBoard 관련 코드 제거
         pass
 
     def printLosses(self, losses, task="training"):
@@ -767,7 +647,6 @@ class Train_model_frontend(object):
         :return:
         """
         for element in list(losses):
-            # print ('add to tb: ', element)
             print(task, "-", element, ": ", losses[element].item())
 
     def add2tensorboard_nms(self, img, labels_2D, semi, task="training", batch_size=1):
@@ -780,106 +659,8 @@ class Train_model_frontend(object):
         :param batch_size:
         :return:
         """
-        from utils.utils import getPtsFromHeatmap
-        from utils.utils import box_nms
-
-        boxNms = False
-        n_iter = self.n_iter
-
-        nms_dist = self.config["model"]["nms"]
-        conf_thresh = self.config["model"]["detection_threshold"]
-        # print("nms_dist: ", nms_dist)
-        precision_recall_list = []
-        precision_recall_boxnms_list = []
-        for idx in range(batch_size):
-            semi_flat_tensor = flattenDetection(semi[idx, :, :, :]).detach()
-            semi_flat = toNumpy(semi_flat_tensor)
-            semi_thd = np.squeeze(semi_flat, 0)
-            pts_nms = getPtsFromHeatmap(semi_thd, conf_thresh, nms_dist)
-            semi_thd_nms_sample = np.zeros_like(semi_thd)
-            semi_thd_nms_sample[
-                pts_nms[1, :].astype(np.int32), pts_nms[0, :].astype(np.int32)
-            ] = 1
-
-            label_sample = torch.squeeze(labels_2D[idx, :, :, :])
-            # pts_nms = getPtsFromHeatmap(label_sample.numpy(), conf_thresh, nms_dist)
-            # label_sample_rms_sample = np.zeros_like(label_sample.numpy())
-            # label_sample_rms_sample[pts_nms[1, :].astype(np.int32), pts_nms[0, :].astype(np.int32)] = 1
-            label_sample_nms_sample = label_sample
-
-            if idx < 5:
-                result_overlap = img_overlap(
-                    np.expand_dims(label_sample_nms_sample, 0),
-                    np.expand_dims(semi_thd_nms_sample, 0),
-                    toNumpy(img[idx, :, :, :]),
-                )
-                self.writer.add_image(
-                    task + "-detector_output_thd_overlay-NMS" + "/%d" % idx,
-                    result_overlap,
-                    n_iter,
-                )
-            assert semi_thd_nms_sample.shape == label_sample_nms_sample.size()
-            precision_recall = precisionRecall_torch(
-                torch.from_numpy(semi_thd_nms_sample), label_sample_nms_sample
-            )
-            precision_recall_list.append(precision_recall)
-
-            if boxNms:
-                semi_flat_tensor_nms = box_nms(
-                    semi_flat_tensor.squeeze(), nms_dist, min_prob=conf_thresh
-                ).cpu()
-                semi_flat_tensor_nms = (semi_flat_tensor_nms >= conf_thresh).float()
-
-                if idx < 5:
-                    result_overlap = img_overlap(
-                        np.expand_dims(label_sample_nms_sample, 0),
-                        semi_flat_tensor_nms.numpy()[np.newaxis, :, :],
-                        toNumpy(img[idx, :, :, :]),
-                    )
-                    self.writer.add_image(
-                        task + "-detector_output_thd_overlay-boxNMS" + "/%d" % idx,
-                        result_overlap,
-                        n_iter,
-                    )
-                precision_recall_boxnms = precisionRecall_torch(
-                    semi_flat_tensor_nms, label_sample_nms_sample
-                )
-                precision_recall_boxnms_list.append(precision_recall_boxnms)
-
-        precision = np.mean(
-            [
-                precision_recall["precision"]
-                for precision_recall in precision_recall_list
-            ]
-        )
-        recall = np.mean(
-            [precision_recall["recall"] for precision_recall in precision_recall_list]
-        )
-        self.writer.add_scalar(task + "-precision_nms", precision, n_iter)
-        self.writer.add_scalar(task + "-recall_nms", recall, n_iter)
-        print(
-            "-- [%s-%d-fast NMS] precision: %.4f, recall: %.4f"
-            % (task, n_iter, precision, recall)
-        )
-        if boxNms:
-            precision = np.mean(
-                [
-                    precision_recall["precision"]
-                    for precision_recall in precision_recall_boxnms_list
-                ]
-            )
-            recall = np.mean(
-                [
-                    precision_recall["recall"]
-                    for precision_recall in precision_recall_boxnms_list
-                ]
-            )
-            self.writer.add_scalar(task + "-precision_boxnms", precision, n_iter)
-            self.writer.add_scalar(task + "-recall_boxnms", recall, n_iter)
-            print(
-                "-- [%s-%d-boxNMS] precision: %.4f, recall: %.4f"
-                % (task, n_iter, precision, recall)
-            )
+        # TensorBoard 관련 코드 제거
+        pass
 
     def get_heatmap(self, semi, det_loss_type="softmax"):
         if det_loss_type == "l2":

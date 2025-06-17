@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn.init import xavier_uniform_, zeros_
+import os
 
 class Conv2DBNBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, use_bias=False):
@@ -113,3 +114,24 @@ class SuperPointNetMobileNetV2(nn.Module):
         desc = desc.div(torch.unsqueeze(dn, 1))
         
         return semi, desc 
+
+    def save_backbone(self, save_path):
+        """백본 모델만 저장하는 메서드"""
+        import os
+        import torch
+        
+        # 백본 모델의 state dict 생성
+        backbone_state = {
+            'conv1': self.conv1.state_dict(),
+            'stage1': self.stage1.state_dict(),
+            'stage2': self.stage2.state_dict(),
+            'stage3': self.stage3.state_dict(),
+            'stage4': self.stage4.state_dict()
+        }
+        
+        # 저장 경로 생성
+        backbone_path = os.path.join(save_path, 'backbone.pth')
+        
+        # 저장
+        torch.save(backbone_state, backbone_path)
+        print(f"백본 모델이 {backbone_path}에 저장되었습니다.") 

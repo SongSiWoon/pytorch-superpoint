@@ -122,10 +122,10 @@ def find_files_with_ext(directory, extension='.npz'):
 def save_checkpoint(save_path, net_state, epoch, filename='checkpoint.pth.tar'):
     file_prefix = ['superPointNet']
     filename = '{}_{}_{}'.format(file_prefix[0], str(epoch), filename)
-    full_path = save_path / filename  # pathlib.Path 객체라면
-    torch.save(net_state, full_path)
+    full_path = save_path / filename
+    torch.save(net_state, full_path, _use_new_zipfile_serialization=False)  # 압축 비활성화
     print("save checkpoint to ", full_path)
-    return str(full_path)  # 전체 경로를 문자열로 반환
+    return str(full_path)
 
 def load_checkpoint(load_path, filename='checkpoint.pth.tar'):
     file_prefix = ['superPointNet']

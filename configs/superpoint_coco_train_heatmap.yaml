@@ -2,7 +2,7 @@ data:
     # name: 'coco'
     dataset: 'Coco' # 'coco'
 
-    labels: datasets/magicpoint_synth20_homoAdapt100_coco_f1/predictions
+    labels: logs/magicpoint_synth_homoAdapt_coco/predictions
     root: # datasets/COCO
     root_split_txt: # /datasets/COCO
 
@@ -103,3 +103,16 @@ pretrained:
 
 
 
+wandb:
+    enable: true
+    project: "superpoint-mobilenet"
+    name: "superpoint-coco"
+    tags: ["superpoint", "coco", "heatmap"]
+    notes: "SuperPointNet with COCO dataset"
+    config:
+        model: "SuperPoint"
+        dataset: "COCO"
+        batch_size: 2
+        learning_rate: 0.0001
+        loss_type: "sparse"
+        augmentation: "photometric" 
